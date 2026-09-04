@@ -1,11 +1,11 @@
 {
   "name": "touch-compras-enterprise",
-  "version": "2.2.1",
+  "version": "2.3.0",
   "private": true,
   "description": "Plataforma empresarial de compras Touch by Ohla",
   "main": "server.js",
   "scripts": {
-    "prestart": "if ! grep -q 'const ROLES=' server.js; then cat rolesactual1.b64 rolesactual2.b64 rolesactual3.b64 | base64 -d | gzip -dc > /tmp/roles.patch && git apply --whitespace=nowarn /tmp/roles.patch; fi && node scripts/prepare-persistence.js && node scripts/bootstrap-admin.js",
+    "prestart": "if ! grep -q 'const ROLES=' server.js; then cat rolesactual1.b64 rolesactual2.b64 rolesactual3.b64 | base64 -d | gzip -dc > /tmp/roles.patch && git apply --whitespace=nowarn /tmp/roles.patch; fi && node scripts/patch-auth-password.js && node scripts/prepare-persistence.js && node scripts/bootstrap-admin.js",
     "start": "node server.js",
     "dev": "nodemon server.js"
   },
