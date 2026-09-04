@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#061f4b">
+  <title>Touch Operations Hub | by Ohla</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<section id="login" class="login marketing-login refined-login">
+  <div class="login-brand marketing-brand refined-brand">
+    <div class="brand-grid"></div><div class="orb orb-one"></div><div class="orb orb-two"></div>
+    <div class="refined-brand-wrap">
+      <div class="brand-top refined-top"><img src="/logo-touch-ohla.png" class="hero-logo refined-logo" alt="Touch by Ohla"><span class="platform-tag refined-tag">MARKETING OPERATIONS HUB</span></div>
+      <div class="refined-copy"><span class="eyebrow light">OPERACIÓN · COMPRAS · ACTIVOS · CONTROL</span><h1>La plataforma interna para gestionar la operación detrás de cada experiencia de marca.</h1><p>Centraliza solicitudes de compra, aprobaciones, órdenes, facturación, presupuesto e inventarios en un solo entorno corporativo.</p></div>
+      <div class="refined-feature-grid"><div class="feature-card"><span class="feature-kicker">COMPRAS</span><strong>Solicitudes y aprobaciones</strong><small>Flujos claros para producción, eventos, retail y operación.</small></div><div class="feature-card"><span class="feature-kicker">FINANZAS</span><strong>Control presupuestal</strong><small>Seguimiento de inversión, órdenes de compra, facturas y pagos.</small></div><div class="feature-card"><span class="feature-kicker">ACTIVOS</span><strong>Inventarios centralizados</strong><small>Control de activos fijos, tecnología, información y circulantes.</small></div></div>
+    </div>
+  </div>
+  <div class="login-panel refined-panel"><form id="loginForm" class="login-card marketing-login-card refined-login-card"><img src="/logo-touch-ohla.png" class="mobile-logo" alt="Touch by Ohla"><div class="login-heading refined-heading"><span class="eyebrow">ACCESO CORPORATIVO</span><h2>Bienvenido a Touch Hub</h2><p>Ingresa a la plataforma para continuar con la gestión operativa y financiera.</p></div><div class="field"><label>Correo corporativo</label><div class="input-shell"><span class="input-icon">@</span><input id="email" type="email" value="admin@touchlatam.com" required></div></div><div class="field"><label>Contraseña</label><div class="input-shell"><span class="input-icon">•</span><input id="password" type="password" value="0000" required></div></div><button class="primary big login-submit refined-submit">Ingresar al hub <span>→</span></button><div class="access-meta"><div class="demo-access refined-access"><span class="demo-dot"></span><div><strong>Entorno de demostración</strong><small>Clave de acceso: 0000</small></div></div><div class="security-note"><strong>Acceso seguro</strong><small>Uso interno · Touch by Ohla</small></div></div></form></div>
+</section>
+<div id="app" class="shell marketing-shell hidden"><aside class="sidebar marketing-sidebar"><div class="logo-box marketing-logo-box"><img src="/logo-touch-ohla.png" alt="Touch by Ohla"><span>OPERATIONS HUB</span></div><div class="workspace-label">WORKSPACE</div><div class="user-box marketing-user-box"><div class="avatar" id="avatar">AD</div><div class="user-copy"><strong id="userName">Administrador</strong><small id="userRole">ADMIN</small></div><span class="online-indicator"></span></div><nav id="nav"></nav><div class="sidebar-promo"><span class="promo-kicker">TOUCH LATAM</span><strong>Ideas que se convierten en experiencias.</strong><small>Marketing · Experiencias · Operación</small></div><button class="logout" id="logout">Cerrar sesión <span>↗</span></button></aside><main class="marketing-main"><header class="topbar marketing-topbar"><div class="page-heading"><div class="page-breadcrumb"><span class="breadcrumb-dot"></span>MARKETING OPERATIONS</div><h1 id="title">Centro de operación</h1><p id="pageSubtitle">Compras, campañas, activos y control financiero en un mismo flujo.</p></div><div class="top-actions"><button id="notificationsBtn" class="icon-action" title="Notificaciones"><span class="bell-icon">◌</span><span id="notifCount" class="notification-count">0</span></button><button id="newRequest" class="primary new-request-btn"><span class="plus-icon">+</span>Nueva solicitud</button></div></header><section id="content" class="marketing-content"></section></main></div>
+<div id="modal" class="modal hidden"><div class="modal-card marketing-modal"><div class="modal-head"><div><span class="eyebrow">TOUCH OPERATIONS</span><h2 id="modalTitle"></h2></div><button id="closeModal">✕</button></div><div id="modalBody"></div></div></div><div id="toast" class="toast"></div><script src="/app.js"></script></body></html>
