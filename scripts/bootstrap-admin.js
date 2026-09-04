@@ -2,12 +2,11 @@ require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
 const Database = require('better-sqlite3');
-const bcrypt = require('bcryptjs');
 
-const email = String(process.env.ADMIN_EMAIL || '').trim().toLowerCase();
-const password = String(process.env.ADMIN_PASSWORD || '');
-if (!email || !password) {
-  console.log('ADMIN bootstrap omitido: faltan ADMIN_EMAIL o ADMIN_PASSWORD.');
+const email = String(process.env.ADMIN_EMAIL || 'admin@touchlatam.com').trim().toLowerCase();
+const hash = String(process.env.ADMIN_PASSWORD_HASH || '');
+if (!hash) {
+  console.log('ADMIN bootstrap omitido: falta ADMIN_PASSWORD_HASH.');
   process.exit(0);
 }
 
@@ -28,7 +27,6 @@ db.exec(`
   );
 `);
 
-const hash = bcrypt.hashSync(password, 10);
 let user = db.prepare('SELECT id FROM users WHERE lower(email)=lower(?)').get(email);
 if (user) {
   db.prepare("UPDATE users SET name=?, password_hash=?, role='ADMIN', approval_level=NULL, active=1 WHERE id=?")
