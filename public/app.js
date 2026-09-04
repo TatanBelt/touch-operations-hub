@@ -7,6 +7,28 @@ const badge=s=>`<span class="badge ${s}">${String(s).replaceAll("_"," ")}</span>
 const api=async(url,opts={})=>{const r=await fetch(url,opts);const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||"Error");return d};
 const initials=n=>(n||"").split(" ").filter(Boolean).map(x=>x[0]).join("").slice(0,2).toUpperCase()||"TU";
 const assetTypeLabels={ACTIVO_FIJO:"Activo fijo",ACTIVO_TECNOLOGIA:"Activo de tecnología",ACTIVO_INFORMACION:"Activo de información",ACTIVO_CIRCULANTE:"Activo circulante"};
+const roleLabels={
+  ADMIN:"Administrador",
+  KAM:"KAM",
+  SOLICITANTE:"Solicitante",
+  COMPRADOR:"Comprador",
+  TESORERIA_PAGOS:"Tesorería y Pagos",
+  CONTROL_GESTION:"Control de Gestión",
+  APROBADOR:"Aprobador"
+};
+const roleDescriptions={
+  ADMIN:"Control total de configuración, usuarios y operación.",
+  KAM:"Registra solicitudes de compra y hace seguimiento para sus proyectos/clientes.",
+  SOLICITANTE:"Registra y consulta sus propias solicitudes de compra.",
+  COMPRADOR:"Gestiona proveedores, carga cotizaciones y genera órdenes de compra.",
+  TESORERIA_PAGOS:"Gestiona facturas, vencimientos y estados de pago.",
+  CONTROL_GESTION:"Supervisa presupuesto, ejecución y trazabilidad de la operación.",
+  APROBADOR:"Aprueba o rechaza solicitudes según su nivel asignado."
+};
+const availableRoles=["ADMIN","KAM","SOLICITANTE","COMPRADOR","TESORERIA_PAGOS","CONTROL_GESTION","APROBADOR"];
+const roleLabel=r=>roleLabels[r]||String(r||"").replaceAll("_"," ");
+const roleOptions=selected=>availableRoles.map(r=>`<option value="${r}" ${selected===r?"selected":""}>${roleLabel(r)}</option>`).join("");
+function canUploadQuotes(){return ["ADMIN","COMPRADOR"].includes(me?.role) && can("requests","edit")}
 const moduleMeta={
   dashboard:{label:"Overview"},
   requests:{label:"Solicitudes"},
@@ -79,7 +101,7 @@ async function start(){
  const available=visibleModules();
  if(!available.includes(current)) current=available[0]||"dashboard";
  $("#userName").textContent=me.name;
- $("#userRole").textContent=me.role+(me.approval_level?` · ${me.approval_level}`:"");
+ $("#userRole").textContent=roleLabel(me.role)+(me.approval_level?` · ${me.approval_level}`:"");
  $("#avatar").textContent=initials(me.name);
  $("#newRequest").style.display=can("requests","create")?"inline-flex":"none";
  renderNav();
@@ -113,27 +135,48 @@ async function refreshNotif(){
  $("#notifCount").textContent=n.filter(x=>!x.is_read).length;
 }
 function roleTone(){
- if(me.role==="ADMIN") return {hero:"Control total del hub y trazabilidad de la operación.", helper:"Administra usuarios, permisos, presupuesto y visibilidad total del sistema."};
- if(me.role==="COMPRADOR") return {hero:"Gestiona compras, órdenes y proveedores sin perder el ritmo operativo.", helper:"Tu vista prioriza solicitudes, órdenes de compra, facturas e inventarios."};
- return {hero:"Aprueba con contexto y mantén el flujo de inversión bajo control.", helper:"Tu vista está enfocada en aprobaciones pendientes, trazabilidad y presupuesto."};
+ const map={
+  ADMIN:{hero:"Control total del hub y trazabilidad de la operación.",helper:"Administra usuarios, permisos, presupuesto y visibilidad total del sistema."},
+  KAM:{hero:"Convierte las necesidades del cliente en solicitudes claras y trazables.",helper:"Registra compras para tus proyectos y consulta su avance sin depender de correos sueltos."},
+  SOLICITANTE:{hero:"Registra tus requerimientos de compra y sigue su estado en un solo lugar.",helper:"Tu vista está enfocada en crear y consultar tus propias solicitudes."},
+  COMPRADOR:{hero:"Centraliza cotizaciones, proveedores y órdenes de compra.",helper:"Recibes las solicitudes aprobadas y registras las cotizaciones enviadas por los proveedores."},
+  TESORERIA_PAGOS:{hero:"Controla facturas, vencimientos y pagos a proveedores.",helper:"Tu vista prioriza obligaciones pendientes, soportes y estado de pago."},
+  CONTROL_GESTION:{hero:"Monitorea presupuesto, ejecución y trazabilidad financiera.",helper:"Supervisa el uso de recursos y el avance de la operación sin intervenir en la compra."},
+  APROBADOR:{hero:"Aprueba con contexto y mantén el flujo de inversión bajo control.",helper:"Tu vista está enfocada en aprobaciones pendientes, trazabilidad y presupuesto."}
+ };
+ return map[me.role]||{hero:"Gestiona tu operación desde Touch Hub.",helper:"Accede únicamente a los módulos habilitados para tu rol."};
 }
 function dashboardKpis(d){
- if(me.role==="ADMIN"){
-  return [
-   {title:"Usuarios activos",value:d.usersCount,note:"Equipo con acceso al hub"},
-   {title:"Inversión comprometida",value:money(d.committed),note:`${d.pending} solicitud(es) pendiente(s)`},
-   {title:"Facturación registrada",value:money(d.invoiced),note:`${d.overdue} factura(s) vencida(s)`},
-   {title:"Inventario valorizado",value:money(d.inventoryValue),note:`${d.inventoryItems} activo(s) registrados`}
-  ];
- }
- if(me.role==="COMPRADOR"){
-  return [
-   {title:"Solicitudes activas",value:d.pending,note:"Pendientes dentro del flujo"},
-   {title:"Compras aprobadas",value:d.approved,note:"Listas para orden de compra"},
-   {title:"Pagos registrados",value:money(d.paid),note:"Facturas pagadas"},
-   {title:"Activos registrados",value:d.inventoryItems,note:"Inventario disponible"}
-  ];
- }
+ if(me.role==="ADMIN") return [
+  {title:"Usuarios activos",value:d.usersCount,note:"Equipo con acceso al hub"},
+  {title:"Inversión comprometida",value:money(d.committed),note:`${d.pending} solicitud(es) pendiente(s)`},
+  {title:"Facturación registrada",value:money(d.invoiced),note:`${d.overdue} factura(s) vencida(s)`},
+  {title:"Inventario valorizado",value:money(d.inventoryValue),note:`${d.inventoryItems} activo(s) registrados`}
+ ];
+ if(me.role==="TESORERIA_PAGOS") return [
+  {title:"Facturación registrada",value:money(d.invoiced),note:"Total radicado"},
+  {title:"Pagos registrados",value:money(d.paid),note:"Facturas pagadas"},
+  {title:"Facturas vencidas",value:d.overdue,note:"Requieren atención"},
+  {title:"Compras aprobadas",value:d.approved,note:"Base para seguimiento financiero"}
+ ];
+ if(me.role==="CONTROL_GESTION") return [
+  {title:"Presupuesto global",value:money(d.budget),note:"Marco de inversión"},
+  {title:"Comprometido",value:money(d.committed),note:"Órdenes generadas"},
+  {title:"Facturado",value:money(d.invoiced),note:"Ejecución registrada"},
+  {title:"Solicitudes abiertas",value:d.pending,note:"En flujo de aprobación/compra"}
+ ];
+ if(["KAM","SOLICITANTE"].includes(me.role)) return [
+  {title:"Mis solicitudes abiertas",value:d.pending,note:"Pendientes en tu flujo"},
+  {title:"Mis solicitudes aprobadas",value:d.approved,note:"Aprobadas / con orden"},
+  {title:"Módulos habilitados",value:visibleModules().length,note:"Según tu perfil"},
+  {title:"Estado",value:"ACTIVO",note:roleLabel(me.role)}
+ ];
+ if(me.role==="COMPRADOR") return [
+  {title:"Solicitudes activas",value:d.pending,note:"Pendientes dentro del flujo"},
+  {title:"Compras aprobadas",value:d.approved,note:"Listas para orden de compra"},
+  {title:"Facturación registrada",value:money(d.invoiced),note:"Consulta financiera"},
+  {title:"Activos registrados",value:d.inventoryItems,note:"Inventario disponible"}
+ ];
  return [
   {title:"Pendientes por aprobar",value:d.myPendingApprovals,note:"Solicitudes en tu radar"},
   {title:"Solicitudes abiertas",value:d.pending,note:"Operación total en flujo"},
@@ -143,21 +186,14 @@ function dashboardKpis(d){
 }
 function dashboardQuickLinks(){
  const links=[];
- if(me.role==="ADMIN"){
-   if(can("requests","create")) links.push({label:"Nueva solicitud",action:"requestModal()"});
-   if(can("users","view")) links.push({label:"Gestionar usuarios",action:"go('users')"});
-   if(can("access","view")) links.push({label:"Roles y accesos",action:"go('access')"});
- }
- if(me.role==="COMPRADOR"){
-   if(can("requests","create")) links.push({label:"Nueva solicitud",action:"requestModal()"});
-   if(can("orders","view")) links.push({label:"Órdenes de compra",action:"go('orders')"});
-   if(can("suppliers","view")) links.push({label:"Directorio proveedores",action:"go('suppliers')"});
- }
- if(me.role==="APROBADOR"){
-   if(can("approvals","view")) links.push({label:"Pendientes por aprobar",action:"go('approvals')"});
-   if(can("requests","view")) links.push({label:"Ver solicitudes",action:"go('requests')"});
-   if(can("budgets","view")) links.push({label:"Consultar presupuesto",action:"go('budgets')"});
- }
+ if(can("requests","create")) links.push({label:"Nueva solicitud",action:"requestModal()"});
+ if(canUploadQuotes()) links.push({label:"Solicitudes / cotizaciones",action:"go('requests')"});
+ if(can("approvals","approve")) links.push({label:"Pendientes por aprobar",action:"go('approvals')"});
+ if(can("invoices","edit")) links.push({label:"Facturación y pagos",action:"go('invoices')"});
+ if(can("budgets","edit")) links.push({label:"Control presupuestal",action:"go('budgets')"});
+ if(can("orders","view")) links.push({label:"Órdenes de compra",action:"go('orders')"});
+ if(can("users","view")) links.push({label:"Gestionar usuarios",action:"go('users')"});
+ if(can("access","view")) links.push({label:"Roles y accesos",action:"go('access')"});
  return links.slice(0,3);
 }
 async function dashboard(){
@@ -171,7 +207,7 @@ async function dashboard(){
  $("#content").innerHTML=`
    <section class="marketing-hero dynamic-role ${me.role}">
      <div class="hero-copy">
-       <span class="hero-label">${me.role==="ADMIN"?"ADMIN CONTROL CENTER":me.role==="COMPRADOR"?"PURCHASING WORKSPACE":"APPROVAL DESK"}</span>
+       <span class="hero-label">${roleLabel(me.role).toUpperCase()}</span>
        <h2>${tone.hero}</h2>
        <p>${tone.helper}</p>
        <div class="role-chip-row">
@@ -186,19 +222,9 @@ async function dashboard(){
    <div class="kpis">${kpis.map(k=>`<div class="kpi"><small>${k.title}</small><strong>${k.value}</strong><div class="note">${k.note}</div></div>`).join("")}</div>
 
    <div class="campaign-strip role-strip">
-     ${me.role==="ADMIN"?`
-     <div class="campaign-pill"><span>PRESUPUESTO TOTAL</span><strong>${money(d.budget)}</strong></div>
-     <div class="campaign-pill"><span>COMPROMETIDO</span><strong>${money(d.committed)}</strong></div>
-     <div class="campaign-pill"><span>DISPONIBLE</span><strong>${money(Math.max(0,d.budget-d.committed))}</strong></div>
-     `:me.role==="COMPRADOR"?`
-     <div class="campaign-pill"><span>ÓRDENES / FACTURAS</span><strong>${money(d.invoiced)}</strong></div>
-     <div class="campaign-pill"><span>POR PAGAR</span><strong>${d.overdue} vencida(s)</strong></div>
-     <div class="campaign-pill"><span>INVENTARIO</span><strong>${money(d.inventoryValue)}</strong></div>
-     `:`
-     <div class="campaign-pill"><span>EN TU BANDEJA</span><strong>${d.myPendingApprovals} solicitud(es)</strong></div>
+     <div class="campaign-pill"><span>SOLICITUDES PENDIENTES</span><strong>${d.pending}</strong></div>
      <div class="campaign-pill"><span>APROBADAS</span><strong>${d.approved}</strong></div>
-     <div class="campaign-pill"><span>PRESUPUESTO</span><strong>${money(d.budget)}</strong></div>
-     `}
+     <div class="campaign-pill"><span>ROL ACTUAL</span><strong>${roleLabel(me.role)}</strong></div>
    </div>
 
    <div class="grid2">
@@ -271,14 +297,14 @@ window.requestDetail=async id=>{
  <div class="quotes-section">
    <div class="section-header quote-head">
      <div><span class="section-kicker">PROVEEDORES</span><h3>Cotizaciones adjuntas</h3></div>
-     ${can("requests","edit")?`<button class="primary" onclick="quoteModal(${r.id},'${r.code}')">+ Subir cotización</button>`:""}
+     ${canUploadQuotes()?`<button class="primary" onclick="quoteModal(${r.id},'${r.code}')">+ Subir cotización</button>`:""}
    </div>
    <div class="quotes-grid">
      ${(d.quotes||[]).length?(d.quotes||[]).map(q=>`
        <div class="quote-card">
          <div class="quote-card-top"><div><strong>${q.supplier_name}</strong><div class="muted">${q.original_name||"Cotización"}</div></div>${q.amount?`<span class="quote-amount">${money(q.amount)}</span>`:""}</div>
          ${q.notes?`<div class="quote-notes">${q.notes}</div>`:""}
-         <div class="quote-actions"><a class="secondary" href="/uploads/${q.attachment}" target="_blank">Abrir archivo</a>${isAdmin()?`<button class="danger delete-admin" onclick="deleteQuote(${r.id},${q.id},'${r.code}')">Eliminar</button>`:""}</div>
+         <div class="quote-actions"><a class="secondary" href="/quotations/${q.attachment}" target="_blank">Abrir archivo</a>${isAdmin()?`<button class="danger delete-admin" onclick="deleteQuote(${r.id},${q.id},'${r.code}')">Eliminar</button>`:""}</div>
          <small class="muted">Subido por ${q.uploaded_by_name||"Usuario"}</small>
        </div>`).join(""):`<div class="empty-quotes">Aún no hay cotizaciones de proveedores cargadas.</div>`}
    </div>
@@ -442,7 +468,7 @@ async function users(){
      ${can("users","create")?`<button class="primary" onclick="userModal()">+ Nuevo usuario</button>`:""}
    </div>
    <div class="table"><table><thead><tr><th>Nombre</th><th>Email</th><th>Rol</th><th>Nivel</th><th>Estado</th><th></th></tr></thead><tbody>
-   ${rows.map(u=>`<tr><td><strong>${u.name}</strong></td><td>${u.email}</td><td>${u.role}</td><td>${u.approval_level||"-"}</td><td>${u.active?badge("ACTIVO"):badge("INACTIVO")}</td><td><div class="actions">${can("users","edit")?`<button class="secondary" onclick='userEditModal(${JSON.stringify(u).replaceAll("'","&#39;")})'>Editar</button>`:""}${isAdmin()?`<button class="danger delete-admin" onclick="deleteUser(${u.id},\`${u.name.replaceAll("`","")}\`)">Eliminar</button>`:""}</div></td></tr>`).join("")}
+   ${rows.map(u=>`<tr><td><strong>${u.name}</strong></td><td>${u.email}</td><td>${roleLabel(u.role)}</td><td>${u.approval_level||"-"}</td><td>${u.active?badge("ACTIVO"):badge("INACTIVO")}</td><td><div class="actions">${can("users","edit")?`<button class="secondary" onclick='userEditModal(${JSON.stringify(u).replaceAll("'","&#39;")})'>Editar</button>`:""}${isAdmin()?`<button class="danger delete-admin" onclick="deleteUser(${u.id},\`${u.name.replaceAll("`","")}\`)">Eliminar</button>`:""}</div></td></tr>`).join("")}
    </tbody></table></div>
  </div>`;
 }
@@ -452,7 +478,7 @@ window.userModal=()=>{
    <div class="field"><label>Nombre</label><input name="name" required></div>
    <div class="field"><label>Email</label><input name="email" type="email" required></div>
    <div class="field"><label>Contraseña</label><input name="password" required></div>
-   <div class="field"><label>Rol</label><select name="role"><option>ADMIN</option><option>COMPRADOR</option><option>APROBADOR</option></select></div>
+   <div class="field"><label>Rol</label><select name="role">${roleOptions("SOLICITANTE")}</select></div>
    <div class="field full"><label>Nivel aprobador (solo si aplica)</label><select name="approval_level"><option value="">No aplica</option><option>COORDINACION</option><option>DIRECCION</option><option>GERENCIA</option></select></div>
    <div class="full"><button class="primary">Crear usuario</button></div>
  </form>`);
@@ -463,11 +489,7 @@ window.userEditModal=(u)=>{
  <form id="userEditForm" class="formgrid">
    <div class="field"><label>Nombre</label><input name="name" value="${u.name||""}" required></div>
    <div class="field"><label>Email</label><input name="email" type="email" value="${u.email||""}" required></div>
-   <div class="field"><label>Rol</label><select name="role">
-      <option value="ADMIN" ${u.role==="ADMIN"?"selected":""}>ADMIN</option>
-      <option value="COMPRADOR" ${u.role==="COMPRADOR"?"selected":""}>COMPRADOR</option>
-      <option value="APROBADOR" ${u.role==="APROBADOR"?"selected":""}>APROBADOR</option>
-   </select></div>
+   <div class="field"><label>Rol</label><select name="role">${roleOptions(u.role)}</select></div>
    <div class="field"><label>Estado</label><select name="active">
       <option value="1" ${u.active?"selected":""}>Activo</option>
       <option value="0" ${!u.active?"selected":""}>Inactivo</option>
@@ -588,61 +610,62 @@ window.inventoryMovementModal=(id,code)=>{
 async function accessControl(){
  title("Control de accesos");
  const d=await api("/api/access/modules");
- const rows=d.rows;
- const roles=d.roles;
- const moduleLabels={
-   dashboard:"Overview",
-   requests:"Solicitudes",
-   approvals:"Aprobaciones",
-   orders:"Órdenes de compra",
-   invoices:"Facturación y pagos",
-   inventory:"Inventarios",
-   budgets:"Presupuestos",
-   suppliers:"Proveedores",
-   users:"Usuarios",
-   access:"Control de accesos"
+ const moduleLabels={dashboard:"Overview",requests:"Solicitudes",approvals:"Aprobaciones",orders:"Órdenes de compra",invoices:"Facturación y pagos",inventory:"Inventarios",budgets:"Presupuestos",suppliers:"Proveedores",users:"Usuarios",access:"Control de accesos"};
+ const moduleHelp={
+  dashboard:"Resumen principal del rol.",requests:"Crear, consultar o gestionar solicitudes.",approvals:"Consultar o decidir aprobaciones.",orders:"Consultar o generar órdenes de compra.",
+  invoices:"Radicar facturas y gestionar pagos.",inventory:"Consultar y administrar activos.",budgets:"Consultar o ajustar presupuestos.",suppliers:"Consultar o administrar proveedores.",
+  users:"Crear y administrar usuarios.",access:"Configurar permisos por rol."
  };
  const grouped={};
- rows.forEach(r=>{grouped[`${r.role}_${r.module}`]=r});
+ d.rows.forEach(r=>grouped[`${r.role}_${r.module}`]=r);
+ const levelOf=item=>!item?.can_view?"NONE":(item.can_create||item.can_edit||item.can_approve||item.can_manage)?"MANAGE":"VIEW";
+
  $("#content").innerHTML=`
-   <div class="role-cards">
-     <div class="role-card"><span class="section-kicker">ADMIN</span><h3>Control total</h3><p>Administra usuarios, permisos, presupuesto y configuración del hub.</p></div>
-     <div class="role-card"><span class="section-kicker">COMPRADOR</span><h3>Operación de compras</h3><p>Solicitud, órdenes, facturas, inventario y consulta operativa.</p></div>
-     <div class="role-card"><span class="section-kicker">APROBADOR</span><h3>Flujo de aprobación</h3><p>Visibilidad de solicitudes, presupuesto y decisiones de aprobación.</p></div>
-   </div>
-   <div class="card">
-     <div class="section-header">
-       <div><span class="section-kicker">ROLE BASED ACCESS</span><h3>Matriz de permisos por rol</h3></div>
-       <div class="pill-compact">Administra vistas y acciones</div>
-     </div>
-     <div class="table permission-table">
-       <table>
-         <thead>
-           <tr>
-             <th>Rol</th><th>Módulo</th><th>Ver</th><th>Crear</th><th>Editar</th><th>Aprobar</th><th>Gestionar</th>
-           </tr>
-         </thead>
-         <tbody>
-           ${roles.map(role=>d.modules.map(module=>{
-             const item=grouped[`${role}_${module}`]||{};
-             return `<tr>
-               <td><strong>${role}</strong></td>
-               <td>${moduleLabels[module]||module}</td>
-               ${["can_view","can_create","can_edit","can_approve","can_manage"].map(field=>`
-                 <td><label class="switch"><input type="checkbox" ${item[field]?"checked":""} onchange="saveAccess('${role}','${module}','${field}',this.checked)"><span></span></label></td>
-               `).join("")}
-             </tr>`;
-           }).join("")).join("")}
-         </tbody>
-       </table>
-     </div>
-   </div>`;
+  <div class="card access-simple-head">
+    <div>
+      <span class="section-kicker">ACCESOS SIMPLIFICADOS</span>
+      <h3>Configura un rol a la vez</h3>
+      <p class="muted">Cada módulo tiene solo 3 niveles: Sin acceso, Solo consulta o Gestionar.</p>
+    </div>
+    <div class="access-role-picker">
+      <label>Rol</label>
+      <select id="accessRole">${d.roles.map(r=>`<option value="${r}">${roleLabel(r)}</option>`).join("")}</select>
+      <button class="secondary" id="resetRoleAccess">Restaurar perfil recomendado</button>
+    </div>
+  </div>
+  <div id="selectedRoleInfo"></div>
+  <div id="accessModules" class="access-simple-grid"></div>`;
+
+ const renderSelectedRole=()=>{
+  const role=$("#accessRole").value;
+  $("#selectedRoleInfo").innerHTML=`<div class="role-card selected-role-card"><span class="section-kicker">${roleLabel(role)}</span><h3>${roleLabel(role)}</h3><p>${roleDescriptions[role]||"Perfil operativo"}</p></div>`;
+  $("#accessModules").innerHTML=d.modules.map(module=>{
+    const item=grouped[`${role}_${module}`]||{};
+    const level=levelOf(item);
+    const locked=role==="ADMIN"&&module==="access";
+    return `<div class="card access-module-card">
+      <div><strong>${moduleLabels[module]||module}</strong><small>${moduleHelp[module]||""}</small></div>
+      <select class="access-level-select" ${locked?"disabled":""} onchange="saveAccessLevel('${role}','${module}',this.value)">
+        <option value="NONE" ${level==="NONE"?"selected":""}>Sin acceso</option>
+        <option value="VIEW" ${level==="VIEW"?"selected":""}>Solo consulta</option>
+        <option value="MANAGE" ${level==="MANAGE"?"selected":""}>Gestionar</option>
+      </select>
+    </div>`;
+  }).join("");
+ };
+ $("#accessRole").onchange=renderSelectedRole;
+ $("#resetRoleAccess").onclick=async()=>{
+  const role=$("#accessRole").value;
+  if(!confirm(`¿Restaurar los permisos recomendados para ${roleLabel(role)}?`)) return;
+  try{await api("/api/access/reset",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({role})});toast("Perfil restaurado");accessControl()}catch(err){toast(err.message)}
+ };
+ renderSelectedRole();
 }
-window.saveAccess=async(role,module,field,value)=>{
-  try{
-    await api("/api/access/modules",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({role,module,field,value:value?1:0})});
-    toast("Permiso actualizado");
-  }catch(err){toast(err.message)}
+window.saveAccessLevel=async(role,module,level)=>{
+ try{
+  await api("/api/access/level",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({role,module,level})});
+  toast("Acceso actualizado");
+ }catch(err){toast(err.message);accessControl()}
 };
 
 async function requestModal(){
@@ -657,28 +680,15 @@ async function requestModal(){
    <div class="field full"><label>Proyecto / Cliente</label><select name="project_id"><option value="">Seleccionar</option>${options.projects.map(p=>`<option value="${p.id}">${p.name} · ${p.client}</option>`).join("")}</select></div>
    <div class="field full"><label>Detalle / justificación</label><textarea name="detail"></textarea></div>
    <div class="field full"><label>Soporte general de la solicitud</label><input type="file" name="attachment" accept=".pdf,.png,.jpg,.jpeg,.doc,.docx,.xls,.xlsx"></div>
-   <div class="field full quote-builder">
-     <div class="quote-builder-head"><div><label>Cotizaciones de proveedores</label><small class="muted">Puedes adjuntar hasta 5 cotizaciones.</small></div><button type="button" class="secondary" id="addQuoteBtn">+ Agregar cotización</button></div>
-     <div id="quoteRows"></div>
-   </div>
+   <div class="notice full"><strong>Flujo de compras:</strong> registra la necesidad y el soporte. El rol Comprador cargará después las cotizaciones recibidas de proveedores.</div>
    <div class="full"><button class="primary">Enviar solicitud</button></div>
  </form>`);
- let quoteIndex=0;
- const addQuoteRow=()=>{
-   if(quoteIndex>=5){toast("Máximo 5 cotizaciones");return;}
-   const idx=quoteIndex++;
-   const row=document.createElement("div");
-   row.className="quote-upload-row";
-   row.innerHTML=`<div class="quote-upload-title"><strong>Cotización ${idx+1}</strong><button type="button" class="link-btn" onclick="this.closest('.quote-upload-row').remove()">Quitar</button></div><div class="formgrid"><div class="field"><label>Proveedor</label><input name="quote_supplier_${idx}" placeholder="Nombre del proveedor" required></div><div class="field"><label>Valor cotizado</label><input type="number" min="0" name="quote_amount_${idx}" placeholder="0"></div><div class="field full"><label>Archivo</label><input type="file" name="quote_file_${idx}" accept=".pdf,.png,.jpg,.jpeg,.doc,.docx,.xls,.xlsx" required></div><div class="field full"><label>Notas</label><input name="quote_notes_${idx}" placeholder="Opcional: vigencia, condiciones, observaciones"></div></div>`;
-   $("#quoteRows").appendChild(row);
- };
- $("#addQuoteBtn").onclick=addQuoteRow;
- addQuoteRow();
  $("#requestForm").onsubmit=async e=>{e.preventDefault();try{const r=await api("/api/requests",{method:"POST",body:new FormData(e.target)});$("#modal").classList.add("hidden");toast(`${r.code} creada y enviada a aprobación`);await refreshNotif();current="requests";renderNav();render()}catch(err){toast(err.message)}};
 }
 
 
 window.quoteModal=(requestId,code)=>{
+ if(!canUploadQuotes()){toast("Solo el rol Comprador puede registrar cotizaciones");return;}
  openModal(`Subir cotización · ${code}`,`
  <form id="quoteForm" class="formgrid">
    <div class="field"><label>Proveedor</label><input name="supplier_name" required></div>

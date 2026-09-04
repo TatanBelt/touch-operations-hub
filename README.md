@@ -226,3 +226,15 @@ Reglas de seguridad:
 - Al eliminar un activo se elimina también su historial de movimientos.
 - Los usuarios se desactivan de forma lógica para conservar trazabilidad histórica.
 - El administrador no puede eliminar su propia cuenta activa.
+
+
+## Almacenamiento persistente (Render)
+
+La aplicación está preparada para usar `STORAGE_DIR=/var/data` con un disco persistente montado en `/var/data`.
+
+Estructura:
+- `/var/data/data/touch_compras_enterprise.db`: base SQLite y archivos WAL.
+- `/var/data/uploads/`: soportes generales, facturas e inventarios.
+- `/var/data/quotations/`: cotizaciones de proveedores.
+
+Para producción en Render se requiere un servicio compatible con Persistent Disk (por ejemplo Starter) y un disco montado en `/var/data`.

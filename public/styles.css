@@ -773,3 +773,19 @@ td strong{color:#24334d}
 .quote-upload-title{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
 .link-btn{border:0;background:transparent;color:#b42318;font-weight:700;cursor:pointer}
 @media(max-width:760px){.quote-builder-head,.quote-card-top{align-items:stretch;flex-direction:column}.quotes-grid{grid-template-columns:1fr}}
+
+
+/* =========================
+   ACCESS CONTROL SIMPLIFIED
+========================= */
+.access-simple-head{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;flex-wrap:wrap}
+.access-role-picker{display:flex;align-items:end;gap:10px;flex-wrap:wrap}
+.access-role-picker label{display:block;font-size:11px;font-weight:800;color:#61708a}
+.access-role-picker select,.access-level-select{min-height:42px;border:1px solid #d9e0ea;border-radius:10px;background:#fff;padding:0 12px;font-weight:750;color:#17345e}
+.selected-role-card{margin:14px 0}
+.access-simple-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.access-module-card{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 18px}
+.access-module-card strong{display:block;margin-bottom:4px}
+.access-module-card small{display:block;color:#718096;max-width:460px}
+.access-level-select{min-width:155px}
+@media(max-width:850px){.access-simple-grid{grid-template-columns:1fr}.access-module-card{align-items:flex-start;flex-direction:column}.access-level-select{width:100%}}

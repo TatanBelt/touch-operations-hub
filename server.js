@@ -19,8 +19,10 @@ const PORT = Number(process.env.PORT || 3000);
 const storageRoot = process.env.STORAGE_DIR || __dirname;
 const dataDir = path.join(storageRoot, "data");
 const uploadsDir = path.join(storageRoot, "uploads");
+const quotationsDir = path.join(storageRoot, "quotations");
 fs.mkdirSync(dataDir, { recursive: true });
 fs.mkdirSync(uploadsDir, { recursive: true });
+fs.mkdirSync(quotationsDir, { recursive: true });
 
 const db = new Database(path.join(dataDir, "touch_compras_enterprise.db"));
 db.pragma("journal_mode = WAL");
@@ -36,15 +38,75 @@ app.use(session({
 }));
 app.use(express.static(path.join(__dirname, "public")));
 app.use("/uploads", express.static(uploadsDir));
+app.use("/quotations", express.static(quotationsDir));
 
 const storage = multer.diskStorage({
-  destination: (_, __, cb) => cb(null, uploadsDir),
+  destination: (req, file, cb) => {
+    const isQuote = /^quote_file_\d+$/.test(file.fieldname) || req.originalUrl.includes("/quotes");
+    cb(null, isQuote ? quotationsDir : uploadsDir);
+  },
   filename: (_, file, cb) => {
     const safe = `${Date.now()}-${file.originalname.replace(/[^\w.\-]/g, "_")}`;
     cb(null, safe);
   }
 });
 const upload = multer({ storage });
+
+const ROLES=["ADMIN","KAM","SOLICITANTE","COMPRADOR","TESORERIA_PAGOS","CONTROL_GESTION","APROBADOR"];
+const REQUEST_CREATOR_ROLES=["ADMIN","KAM","SOLICITANTE"];
+const QUOTE_MANAGER_ROLES=["ADMIN","COMPRADOR"];
+
+function ensureFlexibleRoleSchema(){
+  const usersSql=(db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'").get()||{}).sql||"";
+  const permissionsSql=(db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='module_permissions'").get()||{}).sql||"";
+  const migrateUsers=/CHECK\s*\(\s*role\s+IN/i.test(usersSql);
+  const migratePermissions=/CHECK\s*\(\s*role\s+IN/i.test(permissionsSql);
+  if(!migrateUsers && !migratePermissions) return;
+
+  db.pragma("foreign_keys = OFF");
+  try{
+    if(migrateUsers){
+      db.exec(`
+        DROP TABLE IF EXISTS users_new;
+        CREATE TABLE users_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          email TEXT UNIQUE NOT NULL,
+          password_hash TEXT NOT NULL,
+          role TEXT NOT NULL,
+          approval_level TEXT,
+          active INTEGER DEFAULT 1
+        );
+        INSERT INTO users_new(id,name,email,password_hash,role,approval_level,active)
+          SELECT id,name,email,password_hash,role,approval_level,active FROM users;
+        DROP TABLE users;
+        ALTER TABLE users_new RENAME TO users;
+      `);
+    }
+    if(migratePermissions){
+      db.exec(`
+        DROP TABLE IF EXISTS module_permissions_new;
+        CREATE TABLE module_permissions_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          role TEXT NOT NULL,
+          module TEXT NOT NULL,
+          can_view INTEGER DEFAULT 0,
+          can_create INTEGER DEFAULT 0,
+          can_edit INTEGER DEFAULT 0,
+          can_approve INTEGER DEFAULT 0,
+          can_manage INTEGER DEFAULT 0,
+          UNIQUE(role,module)
+        );
+        INSERT INTO module_permissions_new(id,role,module,can_view,can_create,can_edit,can_approve,can_manage)
+          SELECT id,role,module,can_view,can_create,can_edit,can_approve,can_manage FROM module_permissions;
+        DROP TABLE module_permissions;
+        ALTER TABLE module_permissions_new RENAME TO module_permissions;
+      `);
+    }
+  } finally {
+    db.pragma("foreign_keys = ON");
+  }
+}
 
 function initDB() {
   db.exec(`
@@ -53,7 +115,7 @@ function initDB() {
       name TEXT NOT NULL,
       email TEXT UNIQUE NOT NULL,
       password_hash TEXT NOT NULL,
-      role TEXT NOT NULL CHECK(role IN ('ADMIN','COMPRADOR','APROBADOR')),
+      role TEXT NOT NULL,
       approval_level TEXT,
       active INTEGER DEFAULT 1
     );
@@ -201,7 +263,7 @@ function initDB() {
 
     CREATE TABLE IF NOT EXISTS module_permissions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      role TEXT NOT NULL CHECK(role IN ('ADMIN','COMPRADOR','APROBADOR')),
+      role TEXT NOT NULL,
       module TEXT NOT NULL,
       can_view INTEGER DEFAULT 0,
       can_create INTEGER DEFAULT 0,
@@ -224,6 +286,8 @@ function initDB() {
     );
   `);
 
+  ensureFlexibleRoleSchema();
+
   const users = db.prepare("SELECT COUNT(*) c FROM users").get().c;
   if (!users) {
     const ins = db.prepare("INSERT INTO users(name,email,password_hash,role,approval_level) VALUES (?,?,?,?,?)");
@@ -238,6 +302,17 @@ function initDB() {
       ins.run("Aprobador Coordinación","coord@touchlatam.com",pw,"APROBADOR","COORDINACION");
       ins.run("Aprobador Dirección","direccion@touchlatam.com",pw,"APROBADOR","DIRECCION");
       ins.run("Aprobador Gerencia","gerencia@touchlatam.com",pw,"APROBADOR","GERENCIA");
+    }
+  }
+
+  // Garantiza que el administrador configurado en Render exista sin sobrescribir su contraseña en cada reinicio.
+  const configuredAdminEmail = (process.env.ADMIN_EMAIL || "").trim().toLowerCase();
+  const configuredAdminPassword = process.env.ADMIN_PASSWORD || "";
+  if (configuredAdminEmail && configuredAdminPassword) {
+    const existingConfiguredAdmin = db.prepare("SELECT id FROM users WHERE lower(email)=?").get(configuredAdminEmail);
+    if (!existingConfiguredAdmin) {
+      db.prepare("INSERT INTO users(name,email,password_hash,role,approval_level,active) VALUES (?,?,?,?,?,1)")
+        .run("Administrador Touch", configuredAdminEmail, bcrypt.hashSync(configuredAdminPassword,10), "ADMIN", null);
     }
   }
 
@@ -286,53 +361,44 @@ function role(...roles){
 const MODULES=["dashboard","requests","approvals","orders","invoices","inventory","budgets","suppliers","users","access"];
 const DEFAULT_ROLE_PERMISSIONS={
   ADMIN:{
-    dashboard:{view:1,create:0,edit:0,approve:0,manage:0},
-    requests:{view:1,create:1,edit:1,approve:0,manage:0},
-    approvals:{view:1,create:0,edit:0,approve:1,manage:0},
-    orders:{view:1,create:1,edit:1,approve:0,manage:0},
-    invoices:{view:1,create:1,edit:1,approve:0,manage:0},
-    inventory:{view:1,create:1,edit:1,approve:0,manage:0},
-    budgets:{view:1,create:0,edit:1,approve:0,manage:0},
-    suppliers:{view:1,create:1,edit:1,approve:0,manage:0},
-    users:{view:1,create:1,edit:1,approve:0,manage:1},
-    access:{view:1,create:0,edit:1,approve:0,manage:1}
+    dashboard:{view:1},requests:{view:1,create:1,edit:1},approvals:{view:1,approve:1},orders:{view:1,create:1,edit:1},
+    invoices:{view:1,create:1,edit:1,manage:1},inventory:{view:1,create:1,edit:1,manage:1},budgets:{view:1,edit:1,manage:1},
+    suppliers:{view:1,create:1,edit:1},users:{view:1,create:1,edit:1,manage:1},access:{view:1,edit:1,manage:1}
+  },
+  KAM:{
+    dashboard:{view:1},requests:{view:1,create:1},approvals:{view:1},orders:{view:1},invoices:{view:1},inventory:{view:0},
+    budgets:{view:1},suppliers:{view:1},users:{view:0},access:{view:0}
+  },
+  SOLICITANTE:{
+    dashboard:{view:1},requests:{view:1,create:1},approvals:{view:0},orders:{view:0},invoices:{view:0},inventory:{view:0},
+    budgets:{view:0},suppliers:{view:0},users:{view:0},access:{view:0}
   },
   COMPRADOR:{
-    dashboard:{view:1,create:0,edit:0,approve:0,manage:0},
-    requests:{view:1,create:1,edit:1,approve:0,manage:0},
-    approvals:{view:0,create:0,edit:0,approve:0,manage:0},
-    orders:{view:1,create:1,edit:1,approve:0,manage:0},
-    invoices:{view:1,create:1,edit:1,approve:0,manage:0},
-    inventory:{view:1,create:1,edit:1,approve:0,manage:0},
-    budgets:{view:1,create:0,edit:0,approve:0,manage:0},
-    suppliers:{view:1,create:0,edit:0,approve:0,manage:0},
-    users:{view:0,create:0,edit:0,approve:0,manage:0},
-    access:{view:0,create:0,edit:0,approve:0,manage:0}
+    dashboard:{view:1},requests:{view:1,edit:1},approvals:{view:0},orders:{view:1,create:1,edit:1},invoices:{view:1},
+    inventory:{view:1,create:1,edit:1},budgets:{view:1},suppliers:{view:1,create:1,edit:1},users:{view:0},access:{view:0}
+  },
+  TESORERIA_PAGOS:{
+    dashboard:{view:1},requests:{view:1},approvals:{view:0},orders:{view:1},invoices:{view:1,create:1,edit:1,manage:1},
+    inventory:{view:0},budgets:{view:1},suppliers:{view:1},users:{view:0},access:{view:0}
+  },
+  CONTROL_GESTION:{
+    dashboard:{view:1},requests:{view:1},approvals:{view:1},orders:{view:1},invoices:{view:1},inventory:{view:1},
+    budgets:{view:1,edit:1,manage:1},suppliers:{view:1},users:{view:0},access:{view:0}
   },
   APROBADOR:{
-    dashboard:{view:1,create:0,edit:0,approve:0,manage:0},
-    requests:{view:1,create:0,edit:0,approve:0,manage:0},
-    approvals:{view:1,create:0,edit:0,approve:1,manage:0},
-    orders:{view:0,create:0,edit:0,approve:0,manage:0},
-    invoices:{view:0,create:0,edit:0,approve:0,manage:0},
-    inventory:{view:1,create:0,edit:0,approve:0,manage:0},
-    budgets:{view:1,create:0,edit:0,approve:0,manage:0},
-    suppliers:{view:0,create:0,edit:0,approve:0,manage:0},
-    users:{view:0,create:0,edit:0,approve:0,manage:0},
-    access:{view:0,create:0,edit:0,approve:0,manage:0}
+    dashboard:{view:1},requests:{view:1},approvals:{view:1,approve:1},orders:{view:0},invoices:{view:0},inventory:{view:1},
+    budgets:{view:1},suppliers:{view:0},users:{view:0},access:{view:0}
   }
 };
 
 function seedModulePermissions(){
-  const count=db.prepare("SELECT COUNT(*) c FROM module_permissions").get().c;
-  if(count) return;
   const ins=db.prepare(`
-    INSERT INTO module_permissions(role,module,can_view,can_create,can_edit,can_approve,can_manage)
+    INSERT OR IGNORE INTO module_permissions(role,module,can_view,can_create,can_edit,can_approve,can_manage)
     VALUES (?,?,?,?,?,?,?)
   `);
-  for(const roleName of Object.keys(DEFAULT_ROLE_PERMISSIONS)){
+  for(const roleName of ROLES){
     for(const moduleName of MODULES){
-      const p=DEFAULT_ROLE_PERMISSIONS[roleName][moduleName]||{};
+      const p=DEFAULT_ROLE_PERMISSIONS[roleName]?.[moduleName]||{};
       ins.run(roleName,moduleName,p.view?1:0,p.create?1:0,p.edit?1:0,p.approve?1:0,p.manage?1:0);
     }
   }
@@ -375,6 +441,11 @@ initDB();
 function adminOnly(req,res,next){
   if(!req.session.user) return res.status(401).json({error:"No autenticado"});
   if(req.session.user.role!=="ADMIN") return res.status(403).json({error:"Solo el administrador puede eliminar registros"});
+  next();
+}
+function quoteManagerOnly(req,res,next){
+  if(!req.session.user) return res.status(401).json({error:"No autenticado"});
+  if(!QUOTE_MANAGER_ROLES.includes(req.session.user.role)) return res.status(403).json({error:"Solo Compras puede registrar cotizaciones de proveedores"});
   next();
 }
 
@@ -489,22 +560,75 @@ app.get("/api/access/modules",access("access","view"),(req,res)=>{
     FROM module_permissions
     ORDER BY role,module
   `).all();
-  res.json({modules:MODULES,roles:["ADMIN","COMPRADOR","APROBADOR"],rows});
+  res.json({modules:MODULES,roles:ROLES,rows,defaults:DEFAULT_ROLE_PERMISSIONS});
 });
 
 app.post("/api/access/modules",access("access","manage"),(req,res)=>{
   const {role,module,field,value}=req.body;
   const allowedFields=["can_view","can_create","can_edit","can_approve","can_manage"];
-  if(!["ADMIN","COMPRADOR","APROBADOR"].includes(role)) return res.status(400).json({error:"Rol inválido"});
+  if(!ROLES.includes(role)) return res.status(400).json({error:"Rol inválido"});
   if(!MODULES.includes(module)) return res.status(400).json({error:"Módulo inválido"});
   if(!allowedFields.includes(field)) return res.status(400).json({error:"Campo inválido"});
+  if(role==="ADMIN" && module==="access" && field==="can_view" && !value) return res.status(400).json({error:"El ADMIN debe conservar acceso al panel"});
   db.prepare(`UPDATE module_permissions SET ${field}=? WHERE role=? AND module=?`).run(value?1:0,role,module);
   res.json({ok:true});
 });
 
+function permissionsForLevel(moduleName,level){
+  const out={can_view:0,can_create:0,can_edit:0,can_approve:0,can_manage:0};
+  if(level==="NONE") return out;
+  out.can_view=1;
+  if(level==="VIEW") return out;
+  const manageMap={
+    dashboard:[],
+    requests:["can_create","can_edit"],
+    approvals:["can_approve"],
+    orders:["can_create","can_edit"],
+    invoices:["can_create","can_edit","can_manage"],
+    inventory:["can_create","can_edit","can_manage"],
+    budgets:["can_edit","can_manage"],
+    suppliers:["can_create","can_edit"],
+    users:["can_create","can_edit","can_manage"],
+    access:["can_edit","can_manage"]
+  };
+  (manageMap[moduleName]||[]).forEach(k=>out[k]=1);
+  return out;
+}
+
+app.post("/api/access/level",access("access","manage"),(req,res)=>{
+  const {role,module,level}=req.body;
+  if(!ROLES.includes(role)) return res.status(400).json({error:"Rol inválido"});
+  if(!MODULES.includes(module)) return res.status(400).json({error:"Módulo inválido"});
+  if(!["NONE","VIEW","MANAGE"].includes(level)) return res.status(400).json({error:"Nivel inválido"});
+  if(role==="ADMIN" && module==="access" && level==="NONE") return res.status(400).json({error:"El ADMIN debe conservar acceso al panel"});
+  const p=permissionsForLevel(module,level);
+  db.prepare(`UPDATE module_permissions SET can_view=?,can_create=?,can_edit=?,can_approve=?,can_manage=? WHERE role=? AND module=?`)
+    .run(p.can_view,p.can_create,p.can_edit,p.can_approve,p.can_manage,role,module);
+  res.json({ok:true});
+});
+
+app.post("/api/access/reset",access("access","manage"),(req,res)=>{
+  const {role}=req.body;
+  if(!ROLES.includes(role)) return res.status(400).json({error:"Rol inválido"});
+  const up=db.prepare(`UPDATE module_permissions SET can_view=?,can_create=?,can_edit=?,can_approve=?,can_manage=? WHERE role=? AND module=?`);
+  const tx=db.transaction(()=>{
+    for(const moduleName of MODULES){
+      const p=DEFAULT_ROLE_PERMISSIONS[role]?.[moduleName]||{};
+      up.run(p.view?1:0,p.create?1:0,p.edit?1:0,p.approve?1:0,p.manage?1:0,role,moduleName);
+    }
+  });
+  tx();
+  res.json({ok:true});
+});
+
 app.get("/api/dashboard",access("dashboard"),(req,res)=>{
-  const pending=db.prepare("SELECT COUNT(*) c FROM purchase_requests WHERE status='PENDIENTE'").get().c;
-  const approved=db.prepare("SELECT COUNT(*) c FROM purchase_requests WHERE status IN ('APROBADA','ORDEN_GENERADA')").get().c;
+  const ownOnly=["KAM","SOLICITANTE"].includes(req.session.user.role);
+  const pending=ownOnly
+    ? db.prepare("SELECT COUNT(*) c FROM purchase_requests WHERE status='PENDIENTE' AND requester_id=?").get(req.session.user.id).c
+    : db.prepare("SELECT COUNT(*) c FROM purchase_requests WHERE status='PENDIENTE'").get().c;
+  const approved=ownOnly
+    ? db.prepare("SELECT COUNT(*) c FROM purchase_requests WHERE status IN ('APROBADA','ORDEN_GENERADA') AND requester_id=?").get(req.session.user.id).c
+    : db.prepare("SELECT COUNT(*) c FROM purchase_requests WHERE status IN ('APROBADA','ORDEN_GENERADA')").get().c;
   const committed=db.prepare("SELECT COALESCE(SUM(amount),0) total FROM purchase_orders").get().total;
   const invoiced=db.prepare("SELECT COALESCE(SUM(amount),0) total FROM invoices").get().total;
   const paid=db.prepare("SELECT COALESCE(SUM(amount),0) total FROM invoices WHERE status='PAGADA'").get().total;
@@ -514,17 +638,19 @@ app.get("/api/dashboard",access("dashboard"),(req,res)=>{
   const usersCount=db.prepare("SELECT COUNT(*) c FROM users WHERE active=1").get().c;
   const myPendingApprovals=req.session.user.role==="APROBADOR"
     ? db.prepare(`SELECT COUNT(*) c FROM purchase_requests pr JOIN approval_steps aps ON aps.request_id=pr.id AND aps.status='PENDIENTE' WHERE pr.status='PENDIENTE' AND aps.level=?`).get(req.session.user.approval_level).c
-    : db.prepare("SELECT COUNT(*) c FROM purchase_requests WHERE status='PENDIENTE'").get().c;
+    : pending;
 
-  const recent=db.prepare(`
+  const recentSql=`
     SELECT pr.*,u.name requester,s.name supplier,cc.code cost_center,p.name project,p.client
     FROM purchase_requests pr
     JOIN users u ON u.id=pr.requester_id
     LEFT JOIN suppliers s ON s.id=pr.supplier_id
     LEFT JOIN cost_centers cc ON cc.id=pr.cost_center_id
     LEFT JOIN projects p ON p.id=pr.project_id
+    ${ownOnly?"WHERE pr.requester_id=?":""}
     ORDER BY pr.id DESC LIMIT 8
-  `).all();
+  `;
+  const recent=ownOnly?db.prepare(recentSql).all(req.session.user.id):db.prepare(recentSql).all();
 
   const byCostCenter=db.prepare(`
     SELECT cc.code,cc.name,cc.budget,
@@ -539,7 +665,8 @@ app.get("/api/dashboard",access("dashboard"),(req,res)=>{
 });
 
 app.get("/api/requests",access("requests"),(req,res)=>{
-  const rows=db.prepare(`
+  const ownOnly=["KAM","SOLICITANTE"].includes(req.session.user.role);
+  const sql=`
     SELECT pr.*,u.name requester,s.name supplier,cc.code cost_center,cc.name cost_center_name,
            p.name project,p.client,p.budget project_budget,
            (SELECT COUNT(*) FROM request_quotes rq WHERE rq.request_id=pr.id) quote_count
@@ -548,8 +675,10 @@ app.get("/api/requests",access("requests"),(req,res)=>{
     LEFT JOIN suppliers s ON s.id=pr.supplier_id
     LEFT JOIN cost_centers cc ON cc.id=pr.cost_center_id
     LEFT JOIN projects p ON p.id=pr.project_id
+    ${ownOnly?"WHERE pr.requester_id=?":""}
     ORDER BY pr.id DESC
-  `).all();
+  `;
+  const rows=ownOnly?db.prepare(sql).all(req.session.user.id):db.prepare(sql).all();
   res.json(rows);
 });
 app.get("/api/requests/:id",access("requests"),(req,res)=>{
@@ -564,6 +693,9 @@ app.get("/api/requests/:id",access("requests"),(req,res)=>{
     WHERE pr.id=?
   `).get(req.params.id);
   if(!request) return res.status(404).json({error:"Solicitud no encontrada"});
+  if(["KAM","SOLICITANTE"].includes(req.session.user.role) && Number(request.requester_id)!==Number(req.session.user.id)){
+    return res.status(403).json({error:"Solo puedes consultar tus propias solicitudes"});
+  }
   const steps=db.prepare(`
     SELECT aps.*,u.name approver
     FROM approval_steps aps LEFT JOIN users u ON u.id=aps.approver_id
@@ -581,7 +713,12 @@ app.post("/api/requests",access("requests","create"),upload.any(),(req,res)=>{
   const {area,concept,detail,supplier_id,amount,cost_center_id,project_id}=req.body;
   const files=Array.isArray(req.files)?req.files:[];
   const generalAttachment=files.find(f=>f.fieldname==="attachment");
-  const quoteFiles=files.filter(f=>/^quote_file_\d+$/.test(f.fieldname));
+  const incomingQuoteFiles=files.filter(f=>/^quote_file_\d+$/.test(f.fieldname));
+  const canUploadQuotes=QUOTE_MANAGER_ROLES.includes(req.session.user.role);
+  if(!canUploadQuotes){
+    incomingQuoteFiles.forEach(file=>{ try{ fs.unlinkSync(path.join(quotationsDir,file.filename)); }catch(_){} });
+  }
+  const quoteFiles=canUploadQuotes?incomingQuoteFiles:[];
   const value=Number(amount);
   if(!value || value<=0) return res.status(400).json({error:"Valor inválido"});
   const code=nextCode("SC","purchase_requests");
@@ -611,7 +748,7 @@ app.post("/api/requests",access("requests","create"),upload.any(),(req,res)=>{
   res.json({ok:true,id,code});
 });
 
-app.post("/api/requests/:id/quotes",access("requests","edit"),upload.single("file"),(req,res)=>{
+app.post("/api/requests/:id/quotes",access("requests","edit"),quoteManagerOnly,upload.single("file"),(req,res)=>{
   const request=db.prepare("SELECT id FROM purchase_requests WHERE id=?").get(req.params.id);
   if(!request) return res.status(404).json({error:"Solicitud no encontrada"});
   if(!req.file) return res.status(400).json({error:"Debes adjuntar la cotización"});
@@ -627,7 +764,7 @@ app.delete("/api/requests/:requestId/quotes/:quoteId",adminOnly,(req,res)=>{
   const q=db.prepare("SELECT * FROM request_quotes WHERE id=? AND request_id=?").get(req.params.quoteId,req.params.requestId);
   if(!q) return res.status(404).json({error:"Cotización no encontrada"});
   db.prepare("DELETE FROM request_quotes WHERE id=?").run(q.id);
-  try{ if(q.attachment) fs.unlinkSync(path.join(uploadsDir,q.attachment)); }catch(_){}
+  try{ if(q.attachment) fs.unlinkSync(path.join(quotationsDir,q.attachment)); }catch(_){}
   res.json({ok:true});
 });
 
@@ -815,9 +952,11 @@ app.post("/api/suppliers",access("suppliers","create"),(req,res)=>{
 app.get("/api/users",access("users"),(req,res)=>res.json(db.prepare("SELECT id,name,email,role,approval_level,active FROM users ORDER BY id").all()));
 app.post("/api/users",access("users","create"),(req,res)=>{
   const {name,email,password,role: userRole,approval_level}=req.body;
+  if(!ROLES.includes(userRole)) return res.status(400).json({error:"Rol inválido"});
+  const normalizedLevel=userRole==="APROBADOR"?(approval_level||null):null;
   try{
     const result=db.prepare("INSERT INTO users(name,email,password_hash,role,approval_level) VALUES (?,?,?,?,?)")
-      .run(name,email,bcrypt.hashSync(password,10),userRole,approval_level||null);
+      .run(name,email,bcrypt.hashSync(password,10),userRole,normalizedLevel);
     res.json({ok:true,id:result.lastInsertRowid});
   }catch(e){
     res.status(400).json({error:"No fue posible crear el usuario. Verifica el correo."});
@@ -828,13 +967,15 @@ app.put("/api/users/:id",access("users","edit"),(req,res)=>{
   const {name,email,role:userRole,approval_level,active,password}=req.body;
   const user=db.prepare("SELECT * FROM users WHERE id=?").get(req.params.id);
   if(!user) return res.status(404).json({error:"Usuario no encontrado"});
+  if(!ROLES.includes(userRole)) return res.status(400).json({error:"Rol inválido"});
+  const normalizedLevel=userRole==="APROBADOR"?(approval_level||null):null;
   try{
     if(password && String(password).trim()){
       db.prepare("UPDATE users SET name=?,email=?,role=?,approval_level=?,active=?,password_hash=? WHERE id=?")
-        .run(name,email,userRole,approval_level||null,active?1:0,bcrypt.hashSync(String(password),10),req.params.id);
+        .run(name,email,userRole,normalizedLevel,active?1:0,bcrypt.hashSync(String(password),10),req.params.id);
     }else{
       db.prepare("UPDATE users SET name=?,email=?,role=?,approval_level=?,active=? WHERE id=?")
-        .run(name,email,userRole,approval_level||null,active?1:0,req.params.id);
+        .run(name,email,userRole,normalizedLevel,active?1:0,req.params.id);
     }
     res.json({ok:true});
   }catch(e){

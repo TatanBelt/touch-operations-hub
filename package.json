@@ -1,6 +1,6 @@
 {
   "name": "touch-compras-enterprise",
-  "version": "2.0.1",
+  "version": "2.2.0",
   "private": true,
   "description": "Plataforma empresarial de compras Touch by Ohla",
   "main": "server.js",
