@@ -1,0 +1,20 @@
+CORRECCIÓN PARA WINDOWS + NODE 24
+
+Esta versión actualiza better-sqlite3 a 13.x, compatible con Node 24 y con binarios para Windows x64.
+
+1. Abra la carpeta del proyecto en VS Code.
+2. Abra Terminal > Command Prompt (CMD), o use npm.cmd en PowerShell.
+3. Si existen, elimine node_modules y package-lock.json.
+4. Ejecute:
+
+   npm.cmd install
+
+5. Luego:
+
+   npm.cmd start
+
+6. Abra:
+
+   http://localhost:3000
+
+No debería ser necesario instalar Visual Studio C++ Build Tools.
