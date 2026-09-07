@@ -1,0 +1,126 @@
+const SUPPLIER_DOCUMENT_FIELDS=[
+  {field:"rut",type:"RUT",label:"RUT"},
+  {field:"legal_representative_id",type:"CEDULA_REPRESENTANTE",label:"Cédula del representante legal"},
+  {field:"chamber_commerce",type:"CAMARA_COMERCIO",label:"Certificado de Cámara de Comercio"},
+  {field:"bank_certificate",type:"CERTIFICACION_BANCARIA",label:"Certificación bancaria"},
+  {field:"touch_supplier_form",type:"FORMATO_TOUCH",label:"Formato de creación de proveedores Touch Colombia"}
+];
+const SUPPLIER_UPLOAD_FIELDS=SUPPLIER_DOCUMENT_FIELDS.map(x=>({name:x.field,maxCount:1}));
+const SUPPLIER_ALLOWED_MIMES=new Set(["application/pdf","image/jpeg","image/png"]);
+
+function supplierCameraCurrent(issueDate){
+  if(!issueDate) return false;
+  const issued=new Date(String(issueDate)+"T00:00:00");
+  if(Number.isNaN(issued.getTime())) return false;
+  const today=new Date(); today.setHours(0,0,0,0);
+  const ageDays=Math.floor((today-issued)/86400000);
+  return ageDays>=0 && ageDays<=30;
+}
+function cleanupSupplierUploads(files){
+  Object.values(files||{}).flat().forEach(f=>safeUnlink(supplierDocsDir,f.filename));
+}
+function validateSupplierFiles(files,requireAll=false){
+  const flat=Object.values(files||{}).flat();
+  const invalid=flat.find(f=>!SUPPLIER_ALLOWED_MIMES.has(f.mimetype));
+  if(invalid) return "Los documentos deben estar en formato PDF, JPG o PNG";
+  if(requireAll){
+    const missing=SUPPLIER_DOCUMENT_FIELDS.filter(x=>!files?.[x.field]?.[0]);
+    if(missing.length) return "Debes adjuntar todos los documentos obligatorios del proveedor";
+  }
+  return null;
+}
+function supplierWithDocumentStatus(supplier){
+  const documents=db.prepare("SELECT id,document_type,original_name,issue_date,uploaded_at FROM supplier_documents WHERE supplier_id=? ORDER BY id").all(supplier.id);
+  const types=new Set(documents.map(d=>d.document_type));
+  const camera=documents.find(d=>d.document_type==="CAMARA_COMERCIO");
+  const allRequired=SUPPLIER_DOCUMENT_FIELDS.every(x=>types.has(x.type));
+  const cameraCurrent=supplierCameraCurrent(camera?.issue_date);
+  return {...supplier,document_count:documents.length,documents_complete:allRequired&&cameraCurrent,camera_current:cameraCurrent,camera_issue_date:camera?.issue_date||null};
+}
+
+app.get("/api/suppliers",access("suppliers"),(req,res)=>{
+  const rows=db.prepare("SELECT * FROM suppliers ORDER BY id DESC").all().map(supplierWithDocumentStatus);
+  res.json(rows);
+});
+
+app.get("/api/suppliers/:id",access("suppliers"),(req,res)=>{
+  const supplier=db.prepare("SELECT * FROM suppliers WHERE id=?").get(req.params.id);
+  if(!supplier) return res.status(404).json({error:"Proveedor no encontrado"});
+  const documents=db.prepare("SELECT id,document_type,original_name,issue_date,uploaded_at FROM supplier_documents WHERE supplier_id=? ORDER BY id").all(supplier.id);
+  res.json({supplier:supplierWithDocumentStatus(supplier),documents});
+});
+
+app.get("/api/suppliers/documents/:documentId/file",access("suppliers"),(req,res)=>{
+  const document=db.prepare("SELECT * FROM supplier_documents WHERE id=?").get(req.params.documentId);
+  if(!document) return res.status(404).send("Documento no encontrado");
+  const base=path.resolve(supplierDocsDir)+path.sep;
+  const target=path.resolve(supplierDocsDir,document.filename);
+  if(!target.startsWith(base) || !fs.existsSync(target)) return res.status(404).send("Archivo no disponible");
+  const safeName=String(document.original_name||"documento").replace(/[\r\n"]/g,"_");
+  res.setHeader("Content-Disposition",'inline; filename="'+safeName+'"');
+  res.sendFile(target);
+});
+
+app.post("/api/suppliers",access("suppliers","create"),upload.fields(SUPPLIER_UPLOAD_FIELDS),(req,res)=>{
+  const files=req.files||{};
+  const fileError=validateSupplierFiles(files,true);
+  if(fileError){cleanupSupplierUploads(files);return res.status(400).json({error:fileError});}
+  const name=String(req.body.name||"").trim();
+  const nit=String(req.body.nit||"").trim();
+  const city=String(req.body.city||"").trim();
+  const email=String(req.body.email||"").trim().toLowerCase();
+  const cameraDate=String(req.body.camera_commerce_issue_date||"").trim();
+  if(!name || !nit){cleanupSupplierUploads(files);return res.status(400).json({error:"La razón social y el NIT son obligatorios"});}
+  if(email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){cleanupSupplierUploads(files);return res.status(400).json({error:"El correo electrónico del proveedor no es válido"});}
+  if(!supplierCameraCurrent(cameraDate)){cleanupSupplierUploads(files);return res.status(400).json({error:"El certificado de Cámara de Comercio debe haber sido expedido hace máximo 30 días"});}
+  if(db.prepare("SELECT id FROM suppliers WHERE lower(nit)=lower(?)").get(nit)){cleanupSupplierUploads(files);return res.status(400).json({error:"Ya existe un proveedor registrado con este NIT"});}
+  try{
+    const id=db.transaction(()=>{
+      const created=db.prepare("INSERT INTO suppliers(name,nit,city,email,status) VALUES (?,?,?,?,?)").run(name,nit,city,email,"ACTIVO");
+      const supplierId=created.lastInsertRowid;
+      const insertDocument=db.prepare("INSERT INTO supplier_documents(supplier_id,document_type,filename,original_name,issue_date,uploaded_by) VALUES (?,?,?,?,?,?)");
+      SUPPLIER_DOCUMENT_FIELDS.forEach(def=>{
+        const file=files[def.field][0];
+        insertDocument.run(supplierId,def.type,file.filename,file.originalname,def.type==="CAMARA_COMERCIO"?cameraDate:null,req.session.user.id);
+      });
+      return supplierId;
+    })();
+    res.json({ok:true,id,message:"Proveedor registrado con expediente documental completo"});
+  }catch(error){
+    cleanupSupplierUploads(files);
+    console.error("Error registrando proveedor:",error);
+    res.status(400).json({error:"No fue posible registrar el proveedor. Verifica la información y los documentos."});
+  }
+});
+
+app.post("/api/suppliers/:id/documents",access("suppliers","edit"),upload.fields(SUPPLIER_UPLOAD_FIELDS),(req,res)=>{
+  const supplier=db.prepare("SELECT * FROM suppliers WHERE id=?").get(req.params.id);
+  const files=req.files||{};
+  if(!supplier){cleanupSupplierUploads(files);return res.status(404).json({error:"Proveedor no encontrado"});}
+  const flat=Object.values(files).flat();
+  if(!flat.length) return res.status(400).json({error:"Selecciona al menos un documento para actualizar"});
+  const fileError=validateSupplierFiles(files,false);
+  if(fileError){cleanupSupplierUploads(files);return res.status(400).json({error:fileError});}
+  const cameraFile=files.chamber_commerce?.[0];
+  const cameraDate=String(req.body.camera_commerce_issue_date||"").trim();
+  if(cameraFile && !supplierCameraCurrent(cameraDate)){cleanupSupplierUploads(files);return res.status(400).json({error:"Para actualizar Cámara de Comercio debes indicar una fecha de expedición no mayor a 30 días"});}
+  const oldFiles=[];
+  try{
+    db.transaction(()=>{
+      SUPPLIER_DOCUMENT_FIELDS.forEach(def=>{
+        const file=files[def.field]?.[0];
+        if(!file) return;
+        const old=db.prepare("SELECT * FROM supplier_documents WHERE supplier_id=? AND document_type=?").get(supplier.id,def.type);
+        if(old?.filename) oldFiles.push(old.filename);
+        db.prepare("INSERT INTO supplier_documents(supplier_id,document_type,filename,original_name,issue_date,uploaded_by,uploaded_at) VALUES (?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(supplier_id,document_type) DO UPDATE SET filename=excluded.filename,original_name=excluded.original_name,issue_date=excluded.issue_date,uploaded_by=excluded.uploaded_by,uploaded_at=CURRENT_TIMESTAMP")
+          .run(supplier.id,def.type,file.filename,file.originalname,def.type==="CAMARA_COMERCIO"?cameraDate:null,req.session.user.id);
+      });
+    })();
+    oldFiles.forEach(file=>safeUnlink(supplierDocsDir,file));
+    res.json({ok:true,message:"Documentación del proveedor actualizada"});
+  }catch(error){
+    cleanupSupplierUploads(files);
+    console.error("Error actualizando documentos de proveedor:",error);
+    res.status(400).json({error:"No fue posible actualizar la documentación"});
+  }
+});
