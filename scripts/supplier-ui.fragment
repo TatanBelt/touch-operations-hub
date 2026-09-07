@@ -1,0 +1,101 @@
+const supplierDocumentLabels={
+  RUT:"RUT",
+  CEDULA_REPRESENTANTE:"Cédula del representante legal",
+  CAMARA_COMERCIO:"Cámara de Comercio",
+  CERTIFICACION_BANCARIA:"Certificación bancaria",
+  FORMATO_TOUCH:"Formato de creación de proveedores Touch Colombia"
+};
+function supplierDocumentStatus(s){
+  if(s.documents_complete) return '<span class="supplier-status ok">Completa y vigente</span>';
+  if(s.document_count>=5 && !s.camera_current) return '<span class="supplier-status warn">Cámara de Comercio por renovar</span>';
+  return '<span class="supplier-status pending">Documentación pendiente</span>';
+}
+async function suppliers(){
+ title("Proveedores");
+ const rows=await api("/api/suppliers");
+ $("#content").innerHTML=`
+ <div class="card">
+   <div class="section-header">
+     <div><span class="section-kicker">RED DE PROVEEDORES</span><h3>Registro y documentación de proveedores</h3><p class="muted">Consulta la información tributaria, legal y bancaria requerida por Touch Colombia.</p></div>
+     ${can("suppliers","create")?`<button class="primary" onclick="supplierModal()">+ Registrar proveedor</button>`:""}
+   </div>
+   <div class="table"><table><thead><tr><th>Proveedor</th><th>NIT</th><th>Ciudad</th><th>Correo electrónico</th><th>Documentación</th><th>Estado</th><th></th></tr></thead><tbody>
+   ${rows.map(s=>`<tr><td><strong>${esc(s.name)}</strong></td><td>${esc(s.nit||"-")}</td><td>${esc(s.city||"-")}</td><td>${esc(s.email||"-")}</td><td>${supplierDocumentStatus(s)}<div class="muted">${s.document_count||0}/5 documentos</div></td><td>${esc(s.status||"-")}</td><td><div class="actions"><button class="secondary" onclick="supplierDetail(${s.id})">Ver expediente</button>${isAdmin()?`<button class="danger delete-admin" onclick='deleteSupplier(${s.id},${JSON.stringify(String(s.name))})'>Eliminar</button>`:""}</div></td></tr>`).join("")}
+   </tbody></table></div>
+ </div>`;
+}
+window.supplierModal=()=>{
+ const today=new Date().toISOString().slice(0,10);
+ openModal("Registrar proveedor",`
+ <form id="supplierForm" class="formgrid" enctype="multipart/form-data">
+   <div class="field"><label>Razón social *</label><input name="name" required></div>
+   <div class="field"><label>NIT *</label><input name="nit" required placeholder="Ej. 900123456-7"></div>
+   <div class="field"><label>Ciudad</label><input name="city" placeholder="Ej. Bogotá D. C."></div>
+   <div class="field"><label>Correo electrónico</label><input name="email" type="email"></div>
+   <div class="full supplier-form-heading"><strong>Documentación obligatoria</strong><span>Archivos permitidos: PDF, JPG o PNG · máximo 20 MB por archivo.</span></div>
+   <div class="field"><label>RUT *</label><input name="rut" type="file" accept="application/pdf,image/jpeg,image/png" required></div>
+   <div class="field"><label>Cédula del representante legal *</label><input name="legal_representative_id" type="file" accept="application/pdf,image/jpeg,image/png" required></div>
+   <div class="field"><label>Certificado de Cámara de Comercio *</label><input name="chamber_commerce" type="file" accept="application/pdf,image/jpeg,image/png" required><small>Debe estar vigente y haber sido expedido hace máximo 30 días.</small></div>
+   <div class="field"><label>Fecha de expedición Cámara de Comercio *</label><input name="camera_commerce_issue_date" type="date" max="${today}" required></div>
+   <div class="field"><label>Certificación bancaria *</label><input name="bank_certificate" type="file" accept="application/pdf,image/jpeg,image/png" required></div>
+   <div class="field"><label>Formato de creación de proveedores Touch Colombia *</label><input name="touch_supplier_form" type="file" accept="application/pdf,image/jpeg,image/png" required></div>
+   <div class="notice full">Para activar el proveedor, el expediente debe contener los cinco documentos. El certificado de Cámara de Comercio no puede tener más de 30 días de expedición.</div>
+   <div class="full"><button class="primary">Registrar proveedor</button></div>
+ </form>`);
+ $("#supplierForm").onsubmit=async event=>{
+   event.preventDefault();
+   try{
+     const response=await api("/api/suppliers",{method:"POST",body:new FormData(event.target)});
+     $("#modal").classList.add("hidden");
+     toast(response.message||"Proveedor registrado");
+     options=await api("/api/options");
+     suppliers();
+   }catch(error){toast(error.message)}
+ };
+};
+window.supplierDetail=async id=>{
+ const data=await api(`/api/suppliers/${id}`);
+ const supplier=data.supplier;
+ const byType=Object.fromEntries(data.documents.map(document=>[document.document_type,document]));
+ const order=["RUT","CEDULA_REPRESENTANTE","CAMARA_COMERCIO","CERTIFICACION_BANCARIA","FORMATO_TOUCH"];
+ openModal(`Expediente · ${esc(supplier.name)}`,`
+ <div class="supplier-profile">
+   <div><span>Razón social</span><strong>${esc(supplier.name)}</strong></div><div><span>NIT</span><strong>${esc(supplier.nit||"-")}</strong></div>
+   <div><span>Ciudad</span><strong>${esc(supplier.city||"-")}</strong></div><div><span>Correo electrónico</span><strong>${esc(supplier.email||"-")}</strong></div>
+ </div>
+ <div class="supplier-document-summary">${supplierDocumentStatus(supplier)}<span>${supplier.document_count||0} de 5 documentos registrados</span></div>
+ <div class="supplier-doc-grid">
+ ${order.map(type=>{
+   const document=byType[type];
+   const cameraNote=type==="CAMARA_COMERCIO"&&document?`<small>Expedición: ${esc(document.issue_date||"-")} · ${supplier.camera_current?"Vigente":"Requiere renovación"}</small>`:"";
+   return `<div class="supplier-doc-card ${document?"complete":"missing"}"><div><strong>${supplierDocumentLabels[type]}</strong>${cameraNote}</div>${document?`<a class="secondary" href="/api/suppliers/documents/${document.id}/file" target="_blank">Ver documento</a>`:`<span class="muted">Pendiente</span>`}</div>`;
+ }).join("")}
+ </div>
+ ${can("suppliers","edit")?`<div class="supplier-doc-actions"><button class="primary" onclick='supplierDocsModal(${supplier.id},${JSON.stringify(String(supplier.name))})'>Actualizar documentación</button></div>`:""}
+ `);
+};
+window.supplierDocsModal=(id,name)=>{
+ const today=new Date().toISOString().slice(0,10);
+ openModal(`Actualizar documentación · ${esc(name)}`,`
+ <form id="supplierDocsForm" class="formgrid" enctype="multipart/form-data">
+   <div class="notice full">Adjunta únicamente los documentos que deseas reemplazar. Para Cámara de Comercio, indica también la nueva fecha de expedición.</div>
+   <div class="field"><label>RUT</label><input name="rut" type="file" accept="application/pdf,image/jpeg,image/png"></div>
+   <div class="field"><label>Cédula del representante legal</label><input name="legal_representative_id" type="file" accept="application/pdf,image/jpeg,image/png"></div>
+   <div class="field"><label>Certificado de Cámara de Comercio</label><input name="chamber_commerce" type="file" accept="application/pdf,image/jpeg,image/png"></div>
+   <div class="field"><label>Fecha de expedición Cámara de Comercio</label><input name="camera_commerce_issue_date" type="date" max="${today}"></div>
+   <div class="field"><label>Certificación bancaria</label><input name="bank_certificate" type="file" accept="application/pdf,image/jpeg,image/png"></div>
+   <div class="field"><label>Formato de creación de proveedores Touch Colombia</label><input name="touch_supplier_form" type="file" accept="application/pdf,image/jpeg,image/png"></div>
+   <div class="full"><button class="primary">Guardar documentación</button></div>
+ </form>`);
+ $("#supplierDocsForm").onsubmit=async event=>{
+   event.preventDefault();
+   const hasFile=[...event.target.querySelectorAll('input[type="file"]')].some(input=>input.files?.length);
+   if(!hasFile){toast("Selecciona al menos un documento");return;}
+   try{
+     const response=await api(`/api/suppliers/${id}/documents`,{method:"POST",body:new FormData(event.target)});
+     $("#modal").classList.add("hidden");
+     toast(response.message||"Documentación actualizada");
+     suppliers();
+   }catch(error){toast(error.message)}
+ };
+};
