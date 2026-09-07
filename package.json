@@ -1,6 +1,6 @@
 {
   "name": "touch-compras-enterprise",
-  "version": "2.4.1",
+  "version": "2.4.2",
   "private": true,
   "description": "Plataforma empresarial de compras Touch by Ohla",
   "main": "server.js",
@@ -17,7 +17,7 @@
     "express-session": "^1.18.1",
     "multer": "^2.3.0",
     "nodemailer": "^9.1.1",
-    "pdfkit": "^0.15.1"
+    "pdfkit": "^0.19.1"
   },
   "devDependencies": {
     "nodemon": "^3.1.7"
