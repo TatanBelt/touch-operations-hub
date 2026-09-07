@@ -39,3 +39,4 @@ patchFile(appPath, [
 console.log('Persistencia preparada: SQLite=/data, adjuntos=/uploads, cotizaciones=/quotations dentro de STORAGE_DIR.');
 require('./bootstrap-extra-admin');
 require('./patch-stability');
+require('./patch-inventory-qr');
