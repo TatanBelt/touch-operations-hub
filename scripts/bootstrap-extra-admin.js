@@ -7,8 +7,8 @@ const bcrypt = require('bcryptjs');
 const email = String(process.env.EXTRA_ADMIN_EMAIL || '').trim().toLowerCase();
 const password = String(process.env.EXTRA_ADMIN_PASSWORD || '');
 
-if (!email || !password) {
-  console.log('ADMIN adicional omitido: faltan EXTRA_ADMIN_EMAIL o EXTRA_ADMIN_PASSWORD.');
+if (!email) {
+  console.log('ADMIN adicional omitido: falta EXTRA_ADMIN_EMAIL.');
   process.exit(0);
 }
 
@@ -29,17 +29,19 @@ db.exec(`
   );
 `);
 
-const hash = bcrypt.hashSync(password, 10);
 const existing = db.prepare('SELECT id FROM users WHERE lower(email)=lower(?)').get(email);
-
 if (existing) {
-  db.prepare("UPDATE users SET name=?, password_hash=?, role='ADMIN', approval_level=NULL, active=1 WHERE id=?")
-    .run('Sebastian Beltran', hash, existing.id);
-  console.log('ADMIN adicional actualizado:', email);
-} else {
+  // Mantener la contraseña actual para no revertir cambios hechos desde la plataforma.
+  db.prepare("UPDATE users SET name=?, role='ADMIN', approval_level=NULL, active=1 WHERE id=?")
+    .run('Sebastian Beltran', existing.id);
+  console.log('ADMIN adicional verificado sin restablecer contraseña:', email);
+} else if (password) {
+  const hash = bcrypt.hashSync(password, 10);
   db.prepare('INSERT INTO users(name,email,password_hash,role,approval_level,active) VALUES (?,?,?,?,?,1)')
     .run('Sebastian Beltran', email, hash, 'ADMIN', null);
   console.log('ADMIN adicional creado:', email);
+} else {
+  console.warn('ADMIN adicional no existe y no se pudo crear: falta EXTRA_ADMIN_PASSWORD.');
 }
 
 db.close();
