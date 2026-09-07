@@ -40,3 +40,4 @@ console.log('Persistencia preparada: SQLite=/data, adjuntos=/uploads, cotizacion
 require('./bootstrap-extra-admin');
 require('./patch-stability');
 require('./patch-inventory-qr');
+require('./patch-suppliers-colombia');
