@@ -5,10 +5,6 @@ const Database = require('better-sqlite3');
 
 const email = String(process.env.ADMIN_EMAIL || 'admin@touchlatam.com').trim().toLowerCase();
 const hash = String(process.env.ADMIN_PASSWORD_HASH || '');
-if (!hash) {
-  console.log('ADMIN bootstrap omitido: falta ADMIN_PASSWORD_HASH.');
-  process.exit(0);
-}
 
 const storageRoot = process.env.STORAGE_DIR || path.join(__dirname, '..');
 const dataDir = path.join(storageRoot, 'data');
@@ -27,20 +23,19 @@ db.exec(`
   );
 `);
 
-let user = db.prepare('SELECT id FROM users WHERE lower(email)=lower(?)').get(email);
-if (user) {
-  db.prepare("UPDATE users SET name=?, password_hash=?, role='ADMIN', approval_level=NULL, active=1 WHERE id=?")
-    .run('Administrador Touch', hash, user.id);
+const existing = db.prepare('SELECT id FROM users WHERE lower(email)=lower(?)').get(email);
+if (existing) {
+  // No sobrescribir password_hash: así un cambio de contraseña hecho por el usuario
+  // no se revierte en el siguiente deploy.
+  db.prepare("UPDATE users SET name=?, role='ADMIN', approval_level=NULL, active=1 WHERE id=?")
+    .run('Administrador Touch', existing.id);
+  console.log('ADMIN verificado sin restablecer contraseña:', email);
+} else if (hash) {
+  db.prepare('INSERT INTO users(name,email,password_hash,role,approval_level,active) VALUES (?,?,?,?,?,1)')
+    .run('Administrador Touch', email, hash, 'ADMIN', null);
+  console.log('ADMIN creado:', email);
 } else {
-  user = db.prepare("SELECT id FROM users WHERE role='ADMIN' ORDER BY id LIMIT 1").get();
-  if (user) {
-    db.prepare("UPDATE users SET name=?, email=?, password_hash=?, role='ADMIN', approval_level=NULL, active=1 WHERE id=?")
-      .run('Administrador Touch', email, hash, user.id);
-  } else {
-    db.prepare('INSERT INTO users(name,email,password_hash,role,approval_level,active) VALUES (?,?,?,?,?,1)')
-      .run('Administrador Touch', email, hash, 'ADMIN', null);
-  }
+  console.warn('ADMIN no existe y no se pudo crear: falta ADMIN_PASSWORD_HASH.');
 }
 
-console.log('ADMIN bootstrap listo:', email);
 db.close();
